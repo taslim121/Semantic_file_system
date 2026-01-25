@@ -1,38 +1,35 @@
-import os
 from dataclasses import dataclass
-from typing import Optional
+import yaml
+import os
 
 @dataclass
 class LSFSConfig:
-    """Configuration for Local LSFS"""
+    """Configuration for Local Semantic File System"""
+    root_dir: str
+    vector_db_dir: str
+    embedding_model: str
+    default_results: int
+    max_file_size_mb: int
+    auto_mount: bool = True
+    batch_size: int = 32
     
-    # Directories
-    root_dir: str = "C:/Users/Taslim/OneDrive/Desktop/lsfs-test"
-    # Where ChromaDB stores its data; keep relative to project root by default.
-    vector_db_dir: str = "./.lsfs_db"
-    
-    # Ollama settings
-    ollama_model: str = "qwen2.5:0.5b-instruct"  # Your 3B model
-    ollama_url: str = "http://localhost:11434"
-    
-    # Embedding model (lightweight)
-    embedding_model: str = "all-MiniLM-L6-v2"  # 80MB, fast
-    
-    # Search settings
-    default_search_results: int = 5
-    
-    # Performance
-    enable_caching: bool = True
-    max_file_size_mb: int = 10
-    
-    # Version control (DISABLED - no Redis needed)
-    enable_versioning: bool = False
-    enable_redis:  bool = False
+    @classmethod
+    def from_yaml(cls, path: str):
+        """Load configuration from YAML file"""
+        with open(path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        return cls(
+            root_dir=os.path.expanduser(config['root_dir']),
+            vector_db_dir=os.path.expanduser(config['vector_db_dir']),
+            embedding_model=config['embedding']['model'],
+            default_results=config['search']['default_results'],
+            max_file_size_mb=config['indexing']['max_file_size_mb'],
+            auto_mount=config.get('auto_mount', True),
+            batch_size=config['indexing'].get('batch_size', 32)
+        )
     
     def __post_init__(self):
         """Create directories if they don't exist"""
         os.makedirs(self.root_dir, exist_ok=True)
         os.makedirs(self.vector_db_dir, exist_ok=True)
-
-# Global config instance
-config = LSFSConfig()

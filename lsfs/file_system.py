@@ -1,51 +1,33 @@
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from .vector_store import VectorStore
+from .config import LSFSConfig
 import os
 import shutil
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-from . vector_store import VectorStore
-from .llm_handler import OllamaHandler
-from .config import LSFSConfig
 
 class LocalLSFS:
-    """Local LLM-based Semantic File System"""
+    """Local Semantic File System with instant search (no LLM in search loop)"""
     
     def __init__(self, config: LSFSConfig):
         self.config = config
         self.root_dir = config.root_dir
-        
-        print("=" * 60)
-        print("🚀 Initializing Local LSFS")
-        print("=" * 60)
-        
-        # Initialize components
         self.vector_store = VectorStore(
             config.vector_db_dir,
             config.embedding_model
         )
         
-        self.llm = OllamaHandler(
-            config.ollama_model,
-            config.ollama_url
-        )
-        
-        # Mount root directory
-        self._mount_root()
-        
-        print("=" * 60)
-        print("✅ LSFS Ready!")
-        print("=" * 60)
+        # Mount and index
+        if config.auto_mount:
+            self._mount_root()
     
     def _mount_root(self):
         """Mount and index root directory"""
-        print(f"\n📁 Mounting root directory: {self.root_dir}")
+        if not os.path.exists(self.root_dir):
+            os.makedirs(self.root_dir)
         
-        if os.path.exists(self.root_dir):
-            # Re-index existing files
-            stats = self. vector_store.index_directory(self.root_dir)
-            print(f"✅ Mounted with {stats['indexed']} files indexed")
-        else:
-            os.makedirs(self.root_dir, exist_ok=True)
-            print("✅ Created new root directory")
+        # Initial index if empty
+        if self.vector_store.collection.count() == 0:
+            self.reindex_all()
     
     def create_file(self, file_name: str, content: str = "") -> Dict[str, Any]:
         """Create a new file"""
@@ -56,15 +38,16 @@ class LocalLSFS:
             os.makedirs(os.path.dirname(file_path) if os.path.dirname(file_name) else self.root_dir, exist_ok=True)
             
             # Create file
-            with open(file_path, 'w') as f:
+            with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
             # Index file if it has content
-            if content. strip():
+            if content.strip():
                 self.vector_store.index_file(file_path, self.root_dir)
+                self.vector_store._save_csv_index()
             
             return {
-                "success":  True,
+                "success": True,
                 "file_path": file_path,
                 "relative_path": file_name,
                 "message": f"Created file: {file_name}"
@@ -80,34 +63,32 @@ class LocalLSFS:
             os.makedirs(dir_path, exist_ok=True)
             
             return {
-                "success":  True,
+                "success": True,
                 "dir_path": dir_path,
                 "message": f"Created directory: {dir_name}"
             }
         
-        except Exception as e: 
+        except Exception as e:
             return {"success": False, "error": str(e)}
     
     def write_file(self, file_name: str, content: str, append: bool = False) -> Dict[str, Any]:
         """Write content to file"""
-        try: 
+        try:
             file_path = os.path.join(self.root_dir, file_name)
             
-            # Create file if it doesn't exist
-            if not os.path.exists(file_path):
-                os.makedirs(os.path. dirname(file_path) if os.path.dirname(file_name) else self.root_dir, exist_ok=True)
-            
             mode = 'a' if append else 'w'
-            with open(file_path, mode) as f:
+            with open(file_path, mode, encoding='utf-8') as f:
                 f.write(content)
             
-            # Re-index file
+            # Reindex file
             self.vector_store.index_file(file_path, self.root_dir)
+            self.vector_store._save_csv_index()
             
             return {
                 "success": True,
                 "file_path": file_path,
-                "message": f"{'Appended to' if append else 'Written to'}:  {file_name}"
+                "mode": "appended" if append else "written",
+                "message": f"Content {'appended to' if append else 'written to'} {file_name}"
             }
         
         except Exception as e:
@@ -115,10 +96,10 @@ class LocalLSFS:
     
     def read_file(self, file_name: str) -> Dict[str, Any]:
         """Read file content"""
-        try: 
-            file_path = os. path.join(self.root_dir, file_name)
+        try:
+            file_path = os.path.join(self.root_dir, file_name)
             
-            if not os.path. exists(file_path):
+            if not os.path.exists(file_path):
                 return {"success": False, "error": f"File not found: {file_name}"}
             
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -134,9 +115,9 @@ class LocalLSFS:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def search_files(self, query: str, k: int = 5, keywords: Optional[str] = None) -> Dict[str, Any]:
-        """Semantic search for files"""
-        results = self.vector_store.search(query, k, keywords)
+    def search_files(self, query: str, k: int = 5, file_type: Optional[str] = None) -> Dict[str, Any]:
+        """Semantic search for files - INSTANT (no LLM)"""
+        results = self.vector_store.search(query, k, file_type)
         
         return {
             "success": True,
@@ -147,7 +128,7 @@ class LocalLSFS:
     
     def list_files(self, subdir: str = "") -> Dict[str, Any]:
         """List files in directory"""
-        try: 
+        try:
             target_dir = os.path.join(self.root_dir, subdir) if subdir else self.root_dir
             
             if not os.path.exists(target_dir):
@@ -157,24 +138,22 @@ class LocalLSFS:
             dirs = []
             
             for item in os.listdir(target_dir):
-                if item.startswith('.'):
-                    continue
-                
                 item_path = os.path.join(target_dir, item)
-                if os.path.isfile(item_path):
+                if os.path.isdir(item_path):
+                    dirs.append(item)
+                else:
+                    stat = os.stat(item_path)
                     files.append({
                         "name": item,
-                        "size": os. path.getsize(item_path),
-                        "modified": datetime.fromtimestamp(os. path.getmtime(item_path)).isoformat()
+                        "size": stat.st_size,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
                     })
-                elif os.path.isdir(item_path):
-                    dirs.append(item)
             
             return {
                 "success": True,
                 "path": subdir or "/",
                 "directories": dirs,
-                "files":  files,
+                "files": files,
                 "total": len(files) + len(dirs)
             }
         
@@ -184,42 +163,48 @@ class LocalLSFS:
     def delete_file(self, file_name: str) -> Dict[str, Any]:
         """Delete a file or directory"""
         try:
-            file_path = os.path. join(self.root_dir, file_name)
+            file_path = os.path.join(self.root_dir, file_name)
             
             if not os.path.exists(file_path):
-                return {"success":  False, "error": f"Not found: {file_name}"}
+                return {"success": False, "error": f"File not found: {file_name}"}
             
             if os.path.isfile(file_path):
                 os.remove(file_path)
                 self.vector_store.remove_file(file_path)
-                return {"success": True, "message": f"Deleted file: {file_name}"}
             elif os.path.isdir(file_path):
-                shutil. rmtree(file_path)
-                return {"success": True, "message":  f"Deleted directory: {file_name}"}
-            else:
-                return {"success": False, "error": "Unknown file type"}
+                shutil.rmtree(file_path)
+                # Remove all files in directory from index
+            
+            return {
+                "success": True,
+                "message": f"Deleted: {file_name}"
+            }
         
         except Exception as e:
             return {"success": False, "error": str(e)}
     
     def move_file(self, source: str, destination: str) -> Dict[str, Any]:
         """Move or rename a file"""
-        try: 
-            source_path = os.path.join(self.root_dir, source)
-            dest_path = os.path.join(self.root_dir, destination)
+        try:
+            src_path = os.path.join(self.root_dir, source)
+            dst_path = os.path.join(self.root_dir, destination)
             
-            if not os.path.exists(source_path):
+            if not os.path.exists(src_path):
                 return {"success": False, "error": f"Source not found: {source}"}
             
-            # Create destination directory if needed
-            os.makedirs(os.path.dirname(dest_path) if os.path.dirname(destination) else self.root_dir, exist_ok=True)
+            # Create destination directory
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
             
-            shutil.move(source_path, dest_path)
+            # Move file
+            # Remove from index first
+            self.vector_store.remove_file(src_path)
+            shutil.move(src_path, dst_path)
             
-            # Re-index if it's a file
-            if os.path.isfile(dest_path):
-                self.vector_store. remove_file(source_path)
-                self.vector_store.index_file(dest_path, self.root_dir)
+            # Update index
+            self.vector_store.remove_file(src_path)
+            if os.path.isfile(dst_path):
+                self.vector_store.index_file(dst_path, self.root_dir)
+                self.vector_store._save_csv_index()
             
             return {
                 "success": True,
@@ -229,24 +214,26 @@ class LocalLSFS:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def copy_file(self, source:  str, destination: str) -> Dict[str, Any]:
+    def copy_file(self, source: str, destination: str) -> Dict[str, Any]:
         """Copy a file"""
-        try: 
-            source_path = os. path.join(self.root_dir, source)
-            dest_path = os.path.join(self.root_dir, destination)
+        try:
+            src_path = os.path.join(self.root_dir, source)
+            dst_path = os.path.join(self.root_dir, destination)
             
-            if not os. path.exists(source_path):
+            if not os.path.exists(src_path):
                 return {"success": False, "error": f"Source not found: {source}"}
             
-            # Create destination directory if needed
-            os.makedirs(os.path. dirname(dest_path) if os.path.dirname(destination) else self.root_dir, exist_ok=True)
+            # Create destination directory
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
             
-            if os.path.isfile(source_path):
-                shutil.copy2(source_path, dest_path)
-                # Index the new file
-                self.vector_store.index_file(dest_path, self.root_dir)
-            else:
-                shutil.copytree(source_path, dest_path)
+            # Copy file
+            # Copy and index
+            shutil.copy2(src_path, dst_path)
+            
+            # Index new file
+            if os.path.isfile(dst_path):
+                self.vector_store.index_file(dst_path, self.root_dir)
+                self.vector_store._save_csv_index()
             
             return {
                 "success": True,
@@ -263,120 +250,54 @@ class LocalLSFS:
             return {
                 "success": True,
                 "stats": stats,
-                "message":  f"Re-indexed {stats['indexed']} files"
+                "message": f"Indexed {stats['indexed']} files, {stats['unchanged']} unchanged, {stats['error']} errors"
             }
+        
         except Exception as e:
             return {"success": False, "error": str(e)}
     
     def get_stats(self) -> Dict[str, Any]:
         """Get file system statistics"""
-        vs_stats = self.vector_store. get_stats()
-        
-        # Count actual files in root
-        total_files = 0
-        total_dirs = 0
-        total_size = 0
-        
-        for root, dirs, files in os.walk(self.root_dir):
-            dirs[:] = [d for d in dirs if not d.startswith('. ')]
-            total_dirs += len(dirs)
-            for file in files:
-                if not file.startswith('.'):
-                    total_files += 1
-                    total_size += os.path.getsize(os. path.join(root, file))
-        
         return {
-            "root_directory": self.root_dir,
-            "total_files": total_files,
-            "total_directories": total_dirs,
-            "total_size_mb": round(total_size / (1024 * 1024), 2),
-            "indexed_files": vs_stats['total_files'],
-            "ollama_model": self.config.ollama_model,
-            "embedding_model": self.config.embedding_model,
-            "versioning_enabled": self.config.enable_versioning
+            "success": True,
+            "root_dir": self.root_dir,
+            "vector_stats": self.vector_store.get_stats()
         }
     
-    def process_natural_language(self, user_input: str) -> Dict[str, Any]:
-        """Process natural language command"""
+    def parse_and_execute(self, user_input: str) -> Dict[str, Any]:
+        """Parse and execute commands WITHOUT LLM - instant execution"""
+        user_input = user_input.strip().lower()
         
-        # Parse command with LLM
-        parsed = self.llm.parse_command(user_input)
-
-        # Surface LLM/connection errors directly
-        if parsed.get('operation') == 'error':
-            return {
-                "success": False,
-                "error": parsed.get('parameters', {}).get('message', 'LLM request failed')
-            }
+        # Direct pattern matching (NO LLM)
+        if user_input.startswith("search ") or user_input.startswith("find "):
+            query = user_input.split(' ', 1)[1] if ' ' in user_input else ""
+            return self.search_files(query, self.config.default_results)
         
-        if parsed['confidence'] < 0.5:
-            return {
-                "success":  False,
-                "error": "Could not understand command.  Try 'help' for examples."
-            }
+        elif user_input == "index" or user_input == "reindex":
+            return self.reindex_all()
         
-        operation = parsed['operation']
-        params = parsed. get('parameters', {})
+        elif user_input == "status" or user_input == "stats":
+            return self.get_stats()
         
-        # Execute operation
-        result = self._execute_operation(operation, params)
+        elif user_input.startswith("list"):
+            subdir = user_input[5:].strip() if len(user_input) > 4 else ""
+            return self.list_files(subdir)
         
-        # Generate friendly response
-        if result. get('success'):
-            summary = self. llm.summarize_results(operation, result)
-            result['summary'] = summary
+        elif user_input.startswith("read "):
+            file_name = user_input[5:].strip()
+            return self.read_file(file_name)
         
-        return result
-    
-    def _execute_operation(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute parsed operation"""
+        elif user_input.startswith("create file "):
+            file_name = user_input[12:].strip()
+            return self.create_file(file_name)
         
-        operations = {
-            'create_file': lambda: self.create_file(
-                params.get('file_name', 'untitled.txt'), 
-                params.get('content', '')
-            ),
-            'create_dir': lambda: self.create_directory(
-                params.get('dir_name', 'new_folder')
-            ),
-            'write':  lambda: self.write_file(
-                params.get('file_name'), 
-                params.get('content', ''),
-                params.get('append', False)
-            ),
-            'read': lambda: self.read_file(
-                params.get('file_name')
-            ),
-            'search':  lambda: self.search_files(
-                params.get('query'), 
-                params.get('k', 5), 
-                params.get('keywords')
-            ),
-            'list': lambda: self.list_files(
-                params.get('subdir', '')
-            ),
-            'delete':  lambda: self.delete_file(
-                params.get('file_name')
-            ),
-            'move': lambda: self.move_file(
-                params.get('source'),
-                params.get('destination')
-            ),
-            'copy': lambda: self.copy_file(
-                params.get('source'),
-                params.get('destination')
-            ),
-            'reindex': lambda: self.reindex_all(),
-            'stats': lambda: {"success": True, "stats": self.get_stats()}
-        }
+        elif user_input.startswith("create dir "):
+            dir_name = user_input[11:].strip()
+            return self.create_directory(dir_name)
         
-        if operation in operations:
-            try:
-                return operations[operation]()
-            except TypeError as e:
-                return {
-                    "success": False, 
-                    "error": f"Missing required parameter for {operation}. Try again with more details."
-                }
+        elif user_input.startswith("delete "):
+            file_name = user_input[7:].strip()
+            return self.delete_file(file_name)
+        
         else:
-            return {"success": False, "error": f"Unknown operation: {operation}"}
+            return {"success": False, "error": "Unknown command. Type 'help' for available commands."}

@@ -1,14 +1,10 @@
 # Core dependencies
-chromadb==0.4.22
-sentence-transformers==2.3.1
-requests==2.31.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+PyYAML>=6.0
 
 # Terminal UI
-prompt-toolkit==3.0.43
-rich==13.7.0
+rich>=13.0.0
 
 # Utilities
-numpy==1.24.3
-
-# Optional:  For better tokenization
-nltk==3.8.1
+tqdm>=4.65.0

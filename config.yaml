@@ -1,30 +1,25 @@
-# Local LSFS Configuration
+# Semantic File System Configuration
+root_dir: "C:/Users/Taslim/OneDrive/Desktop/lsfs-test" # Directory to index and search
+vector_db_dir: "./.lsfs_db" # Vector database storage
 
-# Directories
-directories:
-  root_dir: "C:/Users/Taslim/OneDrive/Desktop/lsfs-test"
-  vector_db_dir: "./.lsfs_db"
-
-# LLM Settings
-ollama:
-  model: "qwen2.5:0.5b-instruct" # Change to your preferred model
-  url: "http://localhost:11434"
-
-# Embedding Settings
+# Embedding Model (Lightweight & Fast)
 embedding:
-  model: "all-MiniLM-L6-v2" # Lightweight and fast
+  model: "all-MiniLM-L6-v2" # 80MB model, very fast
 
 # Search Settings
 search:
-  default_results: 5
-  max_file_size_mb: 10
+  default_results: 5 # Number of results to return
+  min_similarity: 0.3 # Minimum similarity threshold
 
-# Performance
-performance:
-  enable_caching: true
+# Indexing Settings
+indexing:
+  max_file_size_mb: 10 # Skip files larger than this
+  batch_size: 32 # Files to process per batch
+  skip_extensions:
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
 
-# Features (DISABLED - No Redis needed)
-features:
-  enable_versioning: false
-  enable_redis: false
-  enable_rollback: false
+# System
+auto_mount: true # Auto-index on startup
