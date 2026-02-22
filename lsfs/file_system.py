@@ -11,10 +11,7 @@ class LocalLSFS:
     def __init__(self, config: LSFSConfig):
         self.config = config
         self.root_dir = config.root_dir
-        self.vector_store = VectorStore(
-            config.vector_db_dir,
-            config.embedding_model
-        )
+        self.vector_store = VectorStore(config)
         
         # Mount and index
         if config.auto_mount:
@@ -250,7 +247,13 @@ class LocalLSFS:
             return {
                 "success": True,
                 "stats": stats,
-                "message": f"Indexed {stats['indexed']} files, {stats['unchanged']} unchanged, {stats['error']} errors"
+                "message": (
+                    f"Indexed {stats['indexed']} files, "
+                    f"{stats['unchanged']} unchanged, "
+                    f"{stats.get('skipped', 0)} skipped, "
+                    f"{stats.get('removed', 0)} removed, "
+                    f"{stats['error']} errors"
+                )
             }
         
         except Exception as e:

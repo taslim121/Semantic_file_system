@@ -14,12 +14,56 @@ search:
 # Indexing Settings
 indexing:
   max_file_size_mb: 10 # Skip files larger than this
-  batch_size: 32 # Files to process per batch
-  skip_extensions:
+  max_text_bytes: 524288 # Only read this many bytes per file (prevents huge RAM use)
+  chunk_size: 1200 # Characters per chunk
+  chunk_overlap: 150 # Overlap for better recall
+  max_chunks_per_file: 8 # Limit chunks per file (large files)
+  batch_size: 32 # Embedding batch size
+  skip_hidden: true # Skip hidden/system files
+  use_default_excludes: true # Add default system/media excludes
+  exclude_dirs:
+    - ".git"
+    - ".venv"
+    - ".lsfs_db"
+    - "__pycache__"
+    - "node_modules"
+    - "dist"
+    - "build"
+    - ".idea"
+    - ".vscode"
+    - "System Volume Information"
+    - "$RECYCLE.BIN"
+  exclude_extensions:
     - ".exe"
     - ".dll"
     - ".so"
     - ".dylib"
+    - ".bin"
+    - ".dat"
+    - ".zip"
+    - ".rar"
+    - ".7z"
+    - ".tar"
+    - ".gz"
+    - ".bz2"
+    - ".iso"
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".bmp"
+    - ".svg"
+    - ".webp"
+    - ".mp4"
+    - ".mkv"
+    - ".avi"
+    - ".mov"
+    - ".mp3"
+    - ".wav"
+    - ".flac"
+    - ".aac"
+    - ".ogg"
+    - ".pdf"
 
 # System
 auto_mount: true # Auto-index on startup
