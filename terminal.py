@@ -42,7 +42,10 @@ def display_help():
     
     commands = [
         ("search <query>", "Search files by content (instant)", "search python functions"),
+        ("search <query> with <types>", "Filter by file types", "search translation key with json and typescript"),
         ("find <query>", "Alias for search", "find machine learning"),
+        ("open <#>", "Open file from last results", "open 1"),
+        ("reveal <#>", "Show file in folder", "reveal 1"),
         ("list [dir]", "List files in directory", "list documents"),
         ("read <file>", "Read file content", "read notes.txt"),
         ("create file <name>", "Create new file", "create file test.txt"),
@@ -72,6 +75,7 @@ def display_search_results(results: list):
     table.add_column("Similarity", style="magenta", justify="right")
     table.add_column("Size", style="yellow", justify="right")
     table.add_column("Preview", style="white")
+    table.add_column("Action", style="cyan", no_wrap=True)
     
     for i, result in enumerate(results, 1):
         similarity_pct = f"{result['similarity'] * 100:.1f}%"
@@ -85,7 +89,8 @@ def display_search_results(results: list):
             result['relative_path'],
             similarity_pct,
             size_kb,
-            preview
+            preview,
+            f"open {i} ->"
         )
     
     console.print(table)
@@ -137,6 +142,25 @@ def _short_path(path: str, max_len: int = 60) -> str:
     if len(path) <= max_len:
         return path
     return "..." + path[-(max_len - 3) :]
+
+
+def _open_file_path(file_path: str):
+    if os.name == "nt":
+        os.startfile(file_path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        os.system(f"open \"{file_path}\"")
+    else:
+        os.system(f"xdg-open \"{file_path}\"")
+
+
+def _reveal_file_path(file_path: str):
+    if os.name == "nt":
+        os.system(f'explorer /select,"{file_path}"')
+    elif sys.platform == "darwin":
+        os.system(f"open -R \"{file_path}\"")
+    else:
+        dir_path = os.path.dirname(file_path)
+        os.system(f"xdg-open \"{dir_path}\"")
 
 
 def run_reindex(lsfs: LocalLSFS):
@@ -193,6 +217,7 @@ def main():
         console.print("[green]✓ System ready! Type 'help' for commands[/green]\n")
         
         # Main loop
+        last_search_results = []
         while True:
             try:
                 # Get user input
@@ -214,6 +239,38 @@ def main():
                     os.system('cls' if os.name == 'nt' else 'clear')
                     display_banner()
                     continue
+
+                if user_input.lower().startswith("open "):
+                    try:
+                        idx = int(user_input.split(" ", 1)[1].strip())
+                        if 1 <= idx <= len(last_search_results):
+                            target = last_search_results[idx - 1].get("file_path")
+                            if target:
+                                _open_file_path(target)
+                                console.print(f"[green]Opened: {target}[/green]")
+                            else:
+                                console.print("[red]No file path available for that result[/red]")
+                        else:
+                            console.print("[red]Invalid index[/red]")
+                    except ValueError:
+                        console.print("[red]Usage: open <number>[/red]")
+                    continue
+
+                if user_input.lower().startswith("reveal "):
+                    try:
+                        idx = int(user_input.split(" ", 1)[1].strip())
+                        if 1 <= idx <= len(last_search_results):
+                            target = last_search_results[idx - 1].get("file_path")
+                            if target:
+                                _reveal_file_path(target)
+                                console.print(f"[green]Revealed: {target}[/green]")
+                            else:
+                                console.print("[red]No file path available for that result[/red]")
+                        else:
+                            console.print("[red]Invalid index[/red]")
+                    except ValueError:
+                        console.print("[red]Usage: reveal <number>[/red]")
+                    continue
                 
                 # Execute command (NO LLM OVERHEAD)
                 if user_input.lower() in ["index", "reindex"]:
@@ -227,6 +284,7 @@ def main():
                     # Search results
                     if 'results' in result:
                         display_search_results(result['results'])
+                        last_search_results = result['results']
                     
                     # File listing
                     elif 'files' in result:

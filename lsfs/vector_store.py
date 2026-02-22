@@ -22,8 +22,16 @@ class VectorStore:
         self.db_path = config.vector_db_dir
         self.csv_index_path = os.path.join(self.db_path, "file_index.csv")
 
-        # Initialize ChromaDB
-        self.client = chromadb.PersistentClient(path=self.db_path)
+        # Initialize ChromaDB (disable telemetry noise if supported)
+        try:
+            from chromadb.config import Settings
+
+            self.client = chromadb.PersistentClient(
+                path=self.db_path, settings=Settings(anonymized_telemetry=False)
+            )
+        except Exception:
+            os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+            self.client = chromadb.PersistentClient(path=self.db_path)
 
         # Models and collections per target
         self.models: Dict[str, SentenceTransformer] = {}
@@ -355,6 +363,7 @@ class VectorStore:
         query: str,
         k: int = 5,
         file_type: Optional[str] = None,
+        file_types: Optional[List[str]] = None,
         min_similarity: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Semantic search for files - INSTANT (no LLM)"""
@@ -366,6 +375,19 @@ class VectorStore:
                 if not ext.startswith("."):
                     ext = f".{ext}"
                 where_filter["extension"] = ext
+
+            normalized_types = None
+            if file_types:
+                normalized = []
+                for ext in file_types:
+                    e = ext.lower().strip()
+                    if not e:
+                        continue
+                    if not e.startswith("."):
+                        e = f".{e}"
+                    normalized.append(e)
+                if normalized:
+                    normalized_types = set(normalized)
 
             targets = self._route_query_targets(query, file_type)
             if not targets:
@@ -416,11 +438,13 @@ class VectorStore:
             sorted_results = sorted(
                 best_by_file.values(), key=lambda x: x['similarity'], reverse=True
             )
-            filtered = [
-                {**r, "similarity": round(r["similarity"], 4)}
-                for r in sorted_results
-                if r["similarity"] >= threshold
-            ]
+            filtered = []
+            for r in sorted_results:
+                if r["similarity"] < threshold:
+                    continue
+                if normalized_types and r.get("extension") not in normalized_types:
+                    continue
+                filtered.append({**r, "similarity": round(r["similarity"], 4)})
 
             return filtered[:k]
 

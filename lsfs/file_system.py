@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from .vector_store import VectorStore
 from .config import LSFSConfig
@@ -112,9 +112,15 @@ class LocalLSFS:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def search_files(self, query: str, k: int = 5, file_type: Optional[str] = None) -> Dict[str, Any]:
+    def search_files(
+        self,
+        query: str,
+        k: int = 5,
+        file_type: Optional[str] = None,
+        file_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Semantic search for files - INSTANT (no LLM)"""
-        results = self.vector_store.search(query, k, file_type)
+        results = self.vector_store.search(query, k, file_type, file_types)
         
         return {
             "success": True,
@@ -122,6 +128,71 @@ class LocalLSFS:
             "results": results,
             "count": len(results)
         }
+
+    def _parse_search_query(self, raw_query: str) -> Tuple[str, List[str]]:
+        """Extract file-type filters from a query like '... with json and typescript'."""
+        import re
+
+        query = raw_query.strip()
+        lower = query.lower()
+        file_types: List[str] = []
+
+        split_idx = -1
+        if " with " in lower:
+            split_idx = lower.find(" with ")
+            filter_part = lower[split_idx + 6 :]
+        elif " in " in lower:
+            split_idx = lower.find(" in ")
+            filter_part = lower[split_idx + 4 :]
+        else:
+            filter_part = ""
+
+        if split_idx != -1:
+            query = raw_query[:split_idx].strip()
+
+        # Remove filler phrases
+        for prefix in ["files related to ", "files about ", "related to ", "about "]:
+            if query.lower().startswith(prefix):
+                query = query[len(prefix) :].strip()
+                break
+
+        if filter_part:
+            filter_part = filter_part.replace("files", " ").replace("file", " ")
+            tokens = [t.strip() for t in re.split(r",|and", filter_part) if t.strip()]
+
+            mapping = {
+                "json": [".json"],
+                "typescript": [".ts", ".tsx"],
+                "ts": [".ts"],
+                "tsx": [".tsx"],
+                "javascript": [".js", ".jsx"],
+                "js": [".js"],
+                "jsx": [".jsx"],
+                "python": [".py"],
+                "py": [".py"],
+                "yaml": [".yaml", ".yml"],
+                "yml": [".yml"],
+                "md": [".md"],
+                "markdown": [".md"],
+                "text": [".txt"],
+                "txt": [".txt"],
+            }
+
+            for token in tokens:
+                if token in mapping:
+                    file_types.extend(mapping[token])
+                elif token.startswith("."):
+                    file_types.append(token)
+                elif token.isalpha():
+                    file_types.append(f".{token}")
+
+        # Also capture explicit .ext in the full query
+        for ext in re.findall(r"\.[a-z0-9]{1,6}", lower):
+            file_types.append(ext)
+
+        # Deduplicate
+        file_types = list(dict.fromkeys(file_types))
+        return query if query else raw_query, file_types
     
     def list_files(self, subdir: str = "") -> Dict[str, Any]:
         """List files in directory"""
@@ -274,7 +345,10 @@ class LocalLSFS:
         # Direct pattern matching (NO LLM)
         if user_input.startswith("search ") or user_input.startswith("find "):
             query = user_input.split(' ', 1)[1] if ' ' in user_input else ""
-            return self.search_files(query, self.config.default_results)
+            parsed_query, file_types = self._parse_search_query(query)
+            return self.search_files(
+                parsed_query, self.config.default_results, file_types=file_types
+            )
         
         elif user_input == "index" or user_input == "reindex":
             return self.reindex_all()
