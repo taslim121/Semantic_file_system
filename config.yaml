@@ -1,24 +1,62 @@
 # Semantic File System Configuration
-root_dir: "C:/Users/Taslim/OneDrive/Desktop/lsfs-test" # Directory to index and search
+root_dir: "C:/Users/Taslim/Downloads" # Directory to index and search
 vector_db_dir: "./.lsfs_db" # Vector database storage
 
-# Embedding Model (Lightweight & Fast)
+# Embedding Models (Different models per file type + intent routing)
 embedding:
-  model: "all-MiniLM-L6-v2" # 80MB model, very fast
+  default_model: "all-mpnet-base-v2" # Stronger text/doc model (~438MB)
+  code_model: "all-mpnet-base-v2" # Efficient code search without a heavy code model
+  intent_model: "all-MiniLM-L6-v2" # Lightweight intent routing model
+  code_extensions:
+    - ".py"
+    - ".js"
+    - ".ts"
+    - ".jsx"
+    - ".tsx"
+    - ".java"
+    - ".c"
+    - ".cpp"
+    - ".h"
+    - ".hpp"
+    - ".cs"
+    - ".go"
+    - ".rs"
+    - ".php"
+    - ".rb"
+    - ".swift"
+    - ".kt"
+    - ".scala"
+    - ".sql"
+    - ".sh"
+    - ".ps1"
+    - ".bat"
 
 # Search Settings
 search:
-  default_results: 5 # Number of results to return
+  default_results: 10 # Number of results to return
   min_similarity: 0.3 # Minimum similarity threshold
+
+# Intent Routing (natural language -> which index to search)
+intent_routing:
+  enabled: true
+  min_confidence: 0.15
+  fallback_target: "default" # "default" or "all"
+  labels:
+    - name: "code"
+      description: "source code, functions, classes, bugs, errors, stack trace, API usage"
+      target: "code"
+    - name: "docs"
+      description: "notes, documents, requirements, specs, meeting notes, guides, plans"
+      target: "default"
 
 # Indexing Settings
 indexing:
   max_file_size_mb: 10 # Skip files larger than this
-  max_text_bytes: 524288 # Only read this many bytes per file (prevents huge RAM use)
-  chunk_size: 1200 # Characters per chunk
-  chunk_overlap: 150 # Overlap for better recall
-  max_chunks_per_file: 8 # Limit chunks per file (large files)
-  batch_size: 32 # Embedding batch size
+  max_text_bytes: 262144 # Only read this many bytes per file (faster, lower RAM)
+  chunk_size: 1000 # Characters per chunk
+  chunk_overlap: 120 # Overlap for better recall
+  max_chunks_per_file: 6 # Limit chunks per file (large files)
+  batch_size: 16 # Embedding batch size (lower CPU spikes)
   skip_hidden: true # Skip hidden/system files
   use_default_excludes: true # Add default system/media excludes
   exclude_dirs:
@@ -64,6 +102,10 @@ indexing:
     - ".aac"
     - ".ogg"
     - ".pdf"
+
+# Performance (keep CPU stable on 8GB PCs)
+performance:
+  max_threads: 4
 
 # System
 auto_mount: true # Auto-index on startup

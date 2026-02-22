@@ -23,7 +23,7 @@ class LocalLSFS:
             os.makedirs(self.root_dir)
         
         # Initial index if empty
-        if self.vector_store.collection.count() == 0:
+        if self.vector_store.get_stats().get("total_files", 0) == 0:
             self.reindex_all()
     
     def create_file(self, file_name: str, content: str = "") -> Dict[str, Any]:
@@ -240,10 +240,10 @@ class LocalLSFS:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def reindex_all(self) -> Dict[str, Any]:
+    def reindex_all(self, progress=None) -> Dict[str, Any]:
         """Re-index all files in root directory"""
         try:
-            stats = self.vector_store.index_directory(self.root_dir)
+            stats = self.vector_store.index_directory(self.root_dir, progress=progress)
             return {
                 "success": True,
                 "stats": stats,
