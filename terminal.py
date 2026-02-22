@@ -241,8 +241,9 @@ def main():
                     continue
 
                 if user_input.lower().startswith("open "):
-                    try:
-                        idx = int(user_input.split(" ", 1)[1].strip())
+                    arg = user_input.split(" ", 1)[1].strip()
+                    if arg.isdigit():
+                        idx = int(arg)
                         if 1 <= idx <= len(last_search_results):
                             target = last_search_results[idx - 1].get("file_path")
                             if target:
@@ -252,13 +253,12 @@ def main():
                                 console.print("[red]No file path available for that result[/red]")
                         else:
                             console.print("[red]Invalid index[/red]")
-                    except ValueError:
-                        console.print("[red]Usage: open <number>[/red]")
-                    continue
+                        continue
 
                 if user_input.lower().startswith("reveal "):
-                    try:
-                        idx = int(user_input.split(" ", 1)[1].strip())
+                    arg = user_input.split(" ", 1)[1].strip()
+                    if arg.isdigit():
+                        idx = int(arg)
                         if 1 <= idx <= len(last_search_results):
                             target = last_search_results[idx - 1].get("file_path")
                             if target:
@@ -268,9 +268,7 @@ def main():
                                 console.print("[red]No file path available for that result[/red]")
                         else:
                             console.print("[red]Invalid index[/red]")
-                    except ValueError:
-                        console.print("[red]Usage: reveal <number>[/red]")
-                    continue
+                        continue
                 
                 # Execute command (NO LLM OVERHEAD)
                 if user_input.lower() in ["index", "reindex"]:

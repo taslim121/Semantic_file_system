@@ -49,6 +49,12 @@ intent_routing:
       description: "notes, documents, requirements, specs, meeting notes, guides, plans"
       target: "default"
 
+# Optional LLM parsing (for messy natural language)
+ollama:
+  enabled: true
+  model: "llama3.2:1b-instruct"
+  url: "http://localhost:11434"
+
 # Indexing Settings
 indexing:
   max_file_size_mb: 10 # Skip files larger than this

@@ -12,6 +12,16 @@ class LocalLSFS:
         self.config = config
         self.root_dir = config.root_dir
         self.vector_store = VectorStore(config)
+        self.ollama_handler = None
+        if config.ollama_enabled:
+            try:
+                from .llm_handler import OllamaHandler
+
+                self.ollama_handler = OllamaHandler(
+                    model=config.ollama_model, base_url=config.ollama_url
+                )
+            except Exception:
+                self.ollama_handler = None
         
         # Mount and index
         if config.auto_mount:
@@ -193,6 +203,177 @@ class LocalLSFS:
         # Deduplicate
         file_types = list(dict.fromkeys(file_types))
         return query if query else raw_query, file_types
+
+    def _tokenize(self, text: str) -> List[str]:
+        import re
+
+        return re.findall(r"[a-z0-9\._\-]+", text.lower())
+
+    def _levenshtein(self, a: str, b: str) -> int:
+        if a == b:
+            return 0
+        if not a:
+            return len(b)
+        if not b:
+            return len(a)
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i]
+            for j, cb in enumerate(b, 1):
+                cost = 0 if ca == cb else 1
+                curr.append(min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost))
+            prev = curr
+        return prev[-1]
+
+    def _fuzzy_score(self, token: str, word: str) -> float:
+        if not token or not word:
+            return 0.0
+        if token == word:
+            return 1.0
+        dist = self._levenshtein(token, word)
+        max_len = max(len(token), len(word))
+        return 1.0 - (dist / max_len)
+
+    def _best_keyword_score(self, tokens: List[str], keywords: List[str]) -> float:
+        best = 0.0
+        for token in tokens:
+            for kw in keywords:
+                score = self._fuzzy_score(token, kw)
+                if score > best:
+                    best = score
+        return best
+
+    def _extract_quoted(self, text: str) -> Optional[str]:
+        import re
+
+        match = re.search(r'"([^"]+)"|\'([^\']+)\'', text)
+        if not match:
+            return None
+        return match.group(1) or match.group(2)
+
+    def _parse_two_paths(self, text: str) -> Tuple[Optional[str], Optional[str]]:
+        import re
+
+        m = re.search(r"from\s+(.+?)\s+to\s+(.+)", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        m = re.search(r"(.+?)\s*->\s*(.+)", text)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        m = re.search(r"(.+?)\s+to\s+(.+)", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        return None, None
+
+    def _parse_command_heuristic(self, raw: str) -> Tuple[Optional[str], Dict[str, Any], float]:
+        text = raw.strip()
+        lower = text.lower()
+        tokens = self._tokenize(text)
+
+        if not tokens:
+            return None, {}, 0.0
+
+        # Direct matches for common operations
+        if lower.startswith(("search ", "find ")):
+            query = text.split(" ", 1)[1] if " " in text else ""
+            parsed_query, file_types = self._parse_search_query(query)
+            return "search", {"query": parsed_query, "file_types": file_types}, 1.0
+        if lower in ("index", "reindex", "scan"):
+            return "reindex", {}, 1.0
+        if lower in ("status", "stats", "info"):
+            return "stats", {}, 1.0
+        if lower.startswith("list"):
+            subdir = text[5:].strip()
+            return "list", {"subdir": subdir}, 1.0
+
+        # Fuzzy detection
+        ops = {
+            "search": ["search", "find", "lookup", "look", "query", "seek"],
+            "list": ["list", "show", "ls", "dir", "browse"],
+            "read": ["read", "open", "view", "cat"],
+            "create": ["create", "make", "new", "touch", "write"],
+            "delete": ["delete", "remove", "rm", "erase"],
+            "move": ["move", "rename"],
+            "copy": ["copy", "duplicate"],
+            "reindex": ["index", "reindex", "scan"],
+            "stats": ["status", "stats", "info"],
+        }
+
+        scores = {op: self._best_keyword_score(tokens, kws) for op, kws in ops.items()}
+        best_op = max(scores, key=scores.get)
+        best_score = scores[best_op]
+
+        # Threshold tuned for typo tolerance
+        if best_score < 0.72:
+            return None, {}, best_score
+
+        if best_op == "search":
+            parsed_query, file_types = self._parse_search_query(text)
+            return "search", {"query": parsed_query, "file_types": file_types}, best_score
+        if best_op == "list":
+            subdir = ""
+            if " in " in lower:
+                subdir = text.lower().split(" in ", 1)[1].strip()
+            return "list", {"subdir": subdir}, best_score
+        if best_op == "read":
+            file_name = self._extract_quoted(text) or tokens[-1]
+            return "read", {"file_name": file_name}, best_score
+        if best_op == "delete":
+            file_name = self._extract_quoted(text) or tokens[-1]
+            return "delete", {"file_name": file_name}, best_score
+        if best_op == "move":
+            src, dst = self._parse_two_paths(text)
+            if src and dst:
+                return "move", {"source": src, "destination": dst}, best_score
+        if best_op == "copy":
+            src, dst = self._parse_two_paths(text)
+            if src and dst:
+                return "copy", {"source": src, "destination": dst}, best_score
+        if best_op == "create":
+            if any(t in tokens for t in ["dir", "folder", "directory"]):
+                dir_name = self._extract_quoted(text) or tokens[-1]
+                return "create_dir", {"dir_name": dir_name}, best_score
+            file_name = self._extract_quoted(text) or tokens[-1]
+            return "create_file", {"file_name": file_name}, best_score
+        if best_op == "reindex":
+            return "reindex", {}, best_score
+        if best_op == "stats":
+            return "stats", {}, best_score
+
+        return None, {}, best_score
+
+    def _execute_operation(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        if operation == "search":
+            return self.search_files(
+                params.get("query", ""),
+                self.config.default_results,
+                file_types=params.get("file_types"),
+            )
+        if operation == "list":
+            return self.list_files(params.get("subdir", ""))
+        if operation == "read":
+            return self.read_file(params.get("file_name", ""))
+        if operation == "create_file":
+            return self.create_file(params.get("file_name", ""), params.get("content", ""))
+        if operation == "create_dir":
+            return self.create_directory(params.get("dir_name", ""))
+        if operation == "write":
+            return self.write_file(
+                params.get("file_name", ""),
+                params.get("content", ""),
+                params.get("append", False),
+            )
+        if operation == "delete":
+            return self.delete_file(params.get("file_name", ""))
+        if operation == "move":
+            return self.move_file(params.get("source", ""), params.get("destination", ""))
+        if operation == "copy":
+            return self.copy_file(params.get("source", ""), params.get("destination", ""))
+        if operation == "reindex":
+            return self.reindex_all()
+        if operation == "stats":
+            return self.get_stats()
+        return {"success": False, "error": "Unknown command"}
     
     def list_files(self, subdir: str = "") -> Dict[str, Any]:
         """List files in directory"""
@@ -340,41 +521,24 @@ class LocalLSFS:
     
     def parse_and_execute(self, user_input: str) -> Dict[str, Any]:
         """Parse and execute commands WITHOUT LLM - instant execution"""
-        user_input = user_input.strip().lower()
-        
-        # Direct pattern matching (NO LLM)
-        if user_input.startswith("search ") or user_input.startswith("find "):
-            query = user_input.split(' ', 1)[1] if ' ' in user_input else ""
-            parsed_query, file_types = self._parse_search_query(query)
-            return self.search_files(
-                parsed_query, self.config.default_results, file_types=file_types
-            )
-        
-        elif user_input == "index" or user_input == "reindex":
-            return self.reindex_all()
-        
-        elif user_input == "status" or user_input == "stats":
-            return self.get_stats()
-        
-        elif user_input.startswith("list"):
-            subdir = user_input[5:].strip() if len(user_input) > 4 else ""
-            return self.list_files(subdir)
-        
-        elif user_input.startswith("read "):
-            file_name = user_input[5:].strip()
-            return self.read_file(file_name)
-        
-        elif user_input.startswith("create file "):
-            file_name = user_input[12:].strip()
-            return self.create_file(file_name)
-        
-        elif user_input.startswith("create dir "):
-            dir_name = user_input[11:].strip()
-            return self.create_directory(dir_name)
-        
-        elif user_input.startswith("delete "):
-            file_name = user_input[7:].strip()
-            return self.delete_file(file_name)
-        
-        else:
-            return {"success": False, "error": "Unknown command. Type 'help' for available commands."}
+        raw = user_input.strip()
+        if not raw:
+            return {"success": False, "error": "Empty command"}
+
+        # Heuristic parsing first (fast, typo-tolerant)
+        op, params, score = self._parse_command_heuristic(raw)
+        if op:
+            return self._execute_operation(op, params)
+
+        # Optional LLM parsing fallback
+        if self.ollama_handler:
+            parsed = self.ollama_handler.parse_command(raw)
+            operation = parsed.get("operation")
+            parameters = parsed.get("parameters", {})
+            if operation and operation != "error":
+                return self._execute_operation(operation, parameters)
+
+        return {
+            "success": False,
+            "error": "Unknown command. Type 'help' for available commands.",
+        }

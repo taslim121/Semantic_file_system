@@ -13,6 +13,9 @@ DEFAULT_MAX_FILE_SIZE_MB = 10
 DEFAULT_INTENT_MIN_CONFIDENCE = 0.15
 DEFAULT_INTENT_FALLBACK_TARGET = "default"
 DEFAULT_MAX_THREADS = 4
+DEFAULT_OLLAMA_ENABLED = False
+DEFAULT_OLLAMA_MODEL = "llama3:8b-instruct"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 DEFAULT_CODE_EXTENSIONS = [
     ".py",
@@ -118,6 +121,9 @@ class LSFSConfig:
     intent_min_confidence: float = DEFAULT_INTENT_MIN_CONFIDENCE
     intent_fallback_target: str = DEFAULT_INTENT_FALLBACK_TARGET
     max_threads: int = DEFAULT_MAX_THREADS
+    ollama_enabled: bool = DEFAULT_OLLAMA_ENABLED
+    ollama_model: str = DEFAULT_OLLAMA_MODEL
+    ollama_url: str = DEFAULT_OLLAMA_URL
     
     @classmethod
     def from_yaml(cls, path: str):
@@ -130,6 +136,7 @@ class LSFSConfig:
         indexing_cfg = config.get('indexing', {}) or {}
         intent_cfg = config.get('intent_routing', {}) or {}
         performance_cfg = config.get('performance', {}) or {}
+        ollama_cfg = config.get('ollama', {}) or {}
 
         default_model = embedding_cfg.get('default_model', embedding_cfg.get('model', DEFAULT_EMBEDDING_MODEL))
         return cls(
@@ -166,6 +173,9 @@ class LSFSConfig:
                 'fallback_target', DEFAULT_INTENT_FALLBACK_TARGET
             ),
             max_threads=performance_cfg.get('max_threads', DEFAULT_MAX_THREADS),
+            ollama_enabled=ollama_cfg.get('enabled', DEFAULT_OLLAMA_ENABLED),
+            ollama_model=ollama_cfg.get('model', DEFAULT_OLLAMA_MODEL),
+            ollama_url=ollama_cfg.get('url', DEFAULT_OLLAMA_URL),
         )
     
     def __post_init__(self):
