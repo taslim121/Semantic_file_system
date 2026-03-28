@@ -1,169 +1,219 @@
-import requests
 import json
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+import requests
 
 
 def _extract_first_json_block(text: str) -> Optional[str]:
-    """Extract the first balanced JSON object from text."""
-    start = text.find('{')
+    start = text.find("{")
     if start == -1:
         return None
     depth = 0
     for i in range(start, len(text)):
         ch = text[i]
-        if ch == '{':
+        if ch == "{":
             depth += 1
-        elif ch == '}':
+        elif ch == "}":
             depth -= 1
             if depth == 0:
                 return text[start : i + 1]
     return None
 
-class OllamaHandler: 
-    """Handles interaction with local Ollama LLM"""
-    
-    def __init__(self, model:  str, base_url: str):
+
+def _extract_first_json_array(text: str) -> Optional[str]:
+    start = text.find("[")
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+class OllamaHandler:
+    """Handles interaction with local Ollama LLM."""
+
+    def __init__(self, model: str, base_url: str):
         self.model = model
-        self.base_url = base_url. rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.api_url = f"{self.base_url}/api/generate"
         self.chat_url = f"{self.base_url}/api/chat"
-        # Allow slower local models without timing out
-        self.request_timeout = 120
-        
-        print(f"🤖 Connecting to Ollama:  {model} at {base_url}")
-        
-        # Test connection
+        self.request_timeout = 45
+
         if not self._test_connection():
-            raise ConnectionError(f"❌ Cannot connect to Ollama at {base_url}")
-        
-        print("✅ Ollama connected!")
-    
+            raise ConnectionError(f"Cannot connect to Ollama at {base_url}")
+
     def _test_connection(self) -> bool:
-        """Test if Ollama is running"""
         try:
             response = requests.get(f"{self.base_url}/api/tags", timeout=5)
             return response.status_code == 200
-        except: 
+        except Exception:
             return False
-    
+
     def parse_command(self, user_input: str) -> Dict[str, Any]:
-        """Parse natural language command using LLM"""
-        
-        system_prompt = """You are a file system command parser. Parse the user's natural language command into a structured JSON response. 
+        """Parse natural language command using local LLM."""
+        system_prompt = """
+You are a strict JSON command parser for a local semantic file system.
+Return ONLY valid JSON (no markdown, no prose).
 
-Available operations:
-- create_file: Create a new file (params: file_name, content)
-- create_dir: Create a directory (params: dir_name)
-- write: Write/append content to a file (params:  file_name, content, append)
-- read: Read a file (params: file_name)
-- search: Search files semantically (params: query, k, keywords)
-- list: List files in directory (params: subdir)
-- delete: Delete a file/directory (params: file_name)
-- move: Move/rename a file (params: source, destination)
-- copy: Copy a file (params: source, destination)
-- reindex: Re-index all files (no params)
-- stats: Show system statistics (no params)
+Allowed operations:
+- create_file {file_name, content?}
+- create_dir {dir_name}
+- write {file_name, content, append?}
+- read {file_name}
+- search {query, k?, file_types?}
+- list {subdir?}
+- delete {file_name}
+- move {source, destination}
+- copy {source, destination}
+- reindex {}
+- stats {}
 
-Return ONLY valid JSON in this format:
+Rules:
+- Fix user spelling mistakes when obvious.
+- If user asks for file types, include "file_types": [".json", ".ts"] etc.
+- Keep k small (default 5) if user doesn't provide k.
+- Output format:
 {
-    "operation": "operation_name",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    },
-    "confidence": 0.95
+  "operation": "...",
+  "parameters": {...},
+  "confidence": 0.0-1.0
 }
-
-Examples:
-User: "create a file called notes.txt"
-{"operation": "create_file", "parameters": {"file_name": "notes.txt"}, "confidence": 0.9}
-
-User: "write 'hello world' to test.txt"
-{"operation": "write", "parameters": {"file_name": "test.txt", "content": "hello world"}, "confidence": 0.9}
-
-User: "search for files about machine learning"
-{"operation":  "search", "parameters": {"query": "machine learning", "k":  5}, "confidence": 0.95}
-
-User: "show me all files"
-{"operation":  "list", "parameters": {}, "confidence": 0.95}
-
-User: "move report.txt to documents/report.txt"
-{"operation": "move", "parameters": {"source":  "report.txt", "destination":  "documents/report.txt"}, "confidence": 0.9}
-
-User: "copy notes.txt to backup/notes.txt"
-{"operation": "copy", "parameters": {"source": "notes.txt", "destination": "backup/notes.txt"}, "confidence": 0.9}
-
-User: "delete old_file.txt"
-{"operation": "delete", "parameters": {"file_name": "old_file.txt"}, "confidence": 0.9}"""
+""".strip()
 
         try:
-            # Call Ollama
             response = requests.post(
                 self.chat_url,
                 json={
                     "model": self.model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_input}
+                        {"role": "user", "content": user_input},
                     ],
                     "stream": False,
-                    "options": {
-                        "temperature": 0.1,
-                        "num_predict": 250
-                    }
+                    "options": {"temperature": 0.0, "num_predict": 220},
                 },
-                timeout=self.request_timeout
+                timeout=self.request_timeout,
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['message']['content'].strip()
-                
-                # Extract JSON from response robustly
-                json_str = _extract_first_json_block(content)
-                if json_str:
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError as e:
-                        return {"operation": "error", "parameters": {"message": f"Parse error: {e}"}, "confidence": 0.0}
-                else:
-                    return {"operation": "error", "parameters": {"message": "No JSON found in LLM response"}, "confidence": 0.0}
-            
-            return {"operation": "error", "parameters": {"message": "LLM request failed"}, "confidence": 0.0}
-        
+            if response.status_code != 200:
+                return {
+                    "operation": "error",
+                    "parameters": {"message": "LLM request failed"},
+                    "confidence": 0.0,
+                }
+
+            content = response.json().get("message", {}).get("content", "").strip()
+            json_str = _extract_first_json_block(content)
+            if not json_str:
+                return {
+                    "operation": "error",
+                    "parameters": {"message": "No JSON found in LLM response"},
+                    "confidence": 0.0,
+                }
+            try:
+                parsed = json.loads(json_str)
+                if "operation" not in parsed:
+                    raise ValueError("Missing operation key")
+                if "parameters" not in parsed or not isinstance(parsed["parameters"], dict):
+                    parsed["parameters"] = {}
+                if "confidence" not in parsed:
+                    parsed["confidence"] = 0.5
+                return parsed
+            except Exception as e:
+                return {
+                    "operation": "error",
+                    "parameters": {"message": f"Parse error: {e}"},
+                    "confidence": 0.0,
+                }
         except Exception as e:
-            print(f"❌ LLM parsing error: {e}")
-            return {"operation": "error", "parameters": {"message": str(e)}, "confidence": 0.0}
-    
-    def summarize_results(self, operation: str, results: Any) -> str:
-        """Generate natural language summary of results"""
-        
-        prompt = f"""Summarize this file system operation result in a friendly, concise way (1-2 sentences):
+            return {
+                "operation": "error",
+                "parameters": {"message": str(e)},
+                "confidence": 0.0,
+            }
 
-Operation: {operation}
-Results:  {json.dumps(results, indent=2)[: 500]}
+    def rerank_results(
+        self, query: str, candidates: List[Dict[str, Any]], final_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Rerank candidate files with LLM, returning up to final_k items."""
+        if not candidates:
+            return []
 
-Be helpful and mention key details like file names, counts, or paths."""
+        short_candidates = []
+        for i, item in enumerate(candidates, start=1):
+            short_candidates.append(
+                {
+                    "id": i,
+                    "file_name": item.get("file_name", ""),
+                    "relative_path": item.get("relative_path", ""),
+                    "preview": (item.get("preview", "") or "")[:240],
+                    "semantic": item.get("semantic_score", item.get("similarity", 0.0)),
+                    "lexical": item.get("lexical_score", 0.0),
+                }
+            )
+
+        prompt = {
+            "task": "rerank_files_for_query",
+            "query": query,
+            "instructions": [
+                "Choose the most relevant files for the user query.",
+                "Prefer exact intent match in filename/path/preview.",
+                "Use semantic and lexical hints, but prioritize user intent.",
+                "Return only JSON array of ids in best-first order.",
+            ],
+            "candidates": short_candidates,
+        }
 
         try:
             response = requests.post(
                 self.api_url,
                 json={
                     "model": self.model,
-                    "prompt": prompt,
+                    "prompt": json.dumps(prompt),
                     "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": 100
-                    }
+                    "options": {"temperature": 0.0, "num_predict": 120},
                 },
-                timeout=self.request_timeout
+                timeout=self.request_timeout,
             )
-            
-            if response.status_code == 200:
-                return response.json()['response'].strip()
-            
-            return "Operation completed."
-        
-        except Exception as e: 
-            return f"Operation completed:  {results. get('message', 'Success')}"
+            if response.status_code != 200:
+                return candidates[:final_k]
+
+            text = response.json().get("response", "").strip()
+            array_str = _extract_first_json_array(text)
+            if not array_str:
+                return candidates[:final_k]
+
+            order = json.loads(array_str)
+            if not isinstance(order, list):
+                return candidates[:final_k]
+
+            by_id = {i + 1: c for i, c in enumerate(candidates)}
+            reranked: List[Dict[str, Any]] = []
+            used = set()
+            for raw_id in order:
+                try:
+                    idx = int(raw_id)
+                except Exception:
+                    continue
+                if idx in by_id and idx not in used:
+                    reranked.append(by_id[idx])
+                    used.add(idx)
+                if len(reranked) >= final_k:
+                    break
+
+            if len(reranked) < final_k:
+                for i, item in enumerate(candidates, start=1):
+                    if i in used:
+                        continue
+                    reranked.append(item)
+                    if len(reranked) >= final_k:
+                        break
+            return reranked[:final_k]
+        except Exception:
+            return candidates[:final_k]

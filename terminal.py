@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Semantic File System Terminal - Instant Search (No LLM in loop)
+Semantic File System Terminal - Hybrid Search + Local LLM fallback
 """
 
 import os
@@ -28,8 +28,8 @@ console = Console()
 def display_banner():
     """Display welcome banner"""
     banner = """
-    # 🚀 Semantic File System v2.0
-    ### Instant Search • No LLM Overhead • CSV Indexing
+    # ðŸš€ Semantic File System v2.0
+    ### Hybrid Search • Local LLM Fallback • CSV + Chroma Index
     """
     console.print(Panel(Markdown(banner), border_style="cyan", box=box.DOUBLE))
 
@@ -105,13 +105,13 @@ def display_file_list(data: dict):
     
     # Directories first
     for dir_name in data.get('directories', []):
-        table.add_row("📁 DIR", dir_name, "-", "-")
+        table.add_row("ðŸ“ DIR", dir_name, "-", "-")
     
     # Then files
     for file in data.get('files', []):
         size_kb = f"{file['size'] / 1024:.1f} KB"
         modified = file['modified'].split('T')[0]  # Date only
-        table.add_row("📄 FILE", file['name'], size_kb, modified)
+        table.add_row("ðŸ“„ FILE", file['name'], size_kb, modified)
     
     console.print(table)
     console.print(f"[cyan]Total: {data['total']} items[/cyan]")
@@ -214,7 +214,7 @@ def main():
         
         # Display banner
         display_banner()
-        console.print("[green]✓ System ready! Type 'help' for commands[/green]\n")
+        console.print("[green]âœ“ System ready! Type 'help' for commands[/green]\n")
         
         # Main loop
         last_search_results = []
@@ -228,7 +228,7 @@ def main():
                 
                 # Handle special commands
                 if user_input.lower() in ['exit', 'quit', 'q']:
-                    console.print("[yellow]Goodbye! 👋[/yellow]")
+                    console.print("[yellow]Goodbye! ðŸ‘‹[/yellow]")
                     break
                 
                 if user_input.lower() == 'help':
@@ -302,10 +302,10 @@ def main():
                     
                     # Generic success message
                     elif 'message' in result:
-                        console.print(f"[green]✓ {result['message']}[/green]")
+                        console.print(f"[green]âœ“ {result['message']}[/green]")
                     
                 else:
-                    console.print(f"[red]✗ Error: {result.get('error', 'Unknown error')}[/red]")
+                    console.print(f"[red]âœ— Error: {result.get('error', 'Unknown error')}[/red]")
             
             except KeyboardInterrupt:
                 console.print("\n[yellow]Interrupted. Type 'exit' to quit.[/yellow]")
@@ -318,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -16,6 +16,11 @@ DEFAULT_MAX_THREADS = 4
 DEFAULT_OLLAMA_ENABLED = False
 DEFAULT_OLLAMA_MODEL = "llama3:8b-instruct"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_SEARCH_CANDIDATES = 40
+DEFAULT_HYBRID_ALPHA = 0.8
+DEFAULT_ALWAYS_RETURN_K = True
+DEFAULT_OLLAMA_RERANK_ENABLED = True
+DEFAULT_OLLAMA_RERANK_TOP_N = 20
 
 DEFAULT_CODE_EXTENSIONS = [
     ".py",
@@ -104,6 +109,9 @@ class LSFSConfig:
     code_extensions: List[str] = field(default_factory=list)
     default_results: int = DEFAULT_RESULTS
     min_similarity: float = DEFAULT_MIN_SIMILARITY
+    search_candidates: int = DEFAULT_SEARCH_CANDIDATES
+    hybrid_alpha: float = DEFAULT_HYBRID_ALPHA
+    always_return_k: bool = DEFAULT_ALWAYS_RETURN_K
     max_file_size_mb: int = DEFAULT_MAX_FILE_SIZE_MB
     auto_mount: bool = True
     batch_size: int = 32
@@ -124,6 +132,8 @@ class LSFSConfig:
     ollama_enabled: bool = DEFAULT_OLLAMA_ENABLED
     ollama_model: str = DEFAULT_OLLAMA_MODEL
     ollama_url: str = DEFAULT_OLLAMA_URL
+    ollama_rerank_enabled: bool = DEFAULT_OLLAMA_RERANK_ENABLED
+    ollama_rerank_top_n: int = DEFAULT_OLLAMA_RERANK_TOP_N
     
     @classmethod
     def from_yaml(cls, path: str):
@@ -139,6 +149,8 @@ class LSFSConfig:
         ollama_cfg = config.get('ollama', {}) or {}
 
         default_model = embedding_cfg.get('default_model', embedding_cfg.get('model', DEFAULT_EMBEDDING_MODEL))
+        rerank_cfg = config.get('rerank', {}) or {}
+
         return cls(
             root_dir=os.path.expanduser(config.get('root_dir', DEFAULT_ROOT_DIR)),
             vector_db_dir=os.path.expanduser(
@@ -150,6 +162,13 @@ class LSFSConfig:
             code_extensions=embedding_cfg.get('code_extensions', DEFAULT_CODE_EXTENSIONS),
             default_results=search_cfg.get('default_results', DEFAULT_RESULTS),
             min_similarity=search_cfg.get('min_similarity', DEFAULT_MIN_SIMILARITY),
+            search_candidates=search_cfg.get(
+                'candidates', DEFAULT_SEARCH_CANDIDATES
+            ),
+            hybrid_alpha=search_cfg.get('hybrid_alpha', DEFAULT_HYBRID_ALPHA),
+            always_return_k=search_cfg.get(
+                'always_return_k', DEFAULT_ALWAYS_RETURN_K
+            ),
             max_file_size_mb=indexing_cfg.get(
                 'max_file_size_mb', DEFAULT_MAX_FILE_SIZE_MB
             ),
@@ -176,6 +195,12 @@ class LSFSConfig:
             ollama_enabled=ollama_cfg.get('enabled', DEFAULT_OLLAMA_ENABLED),
             ollama_model=ollama_cfg.get('model', DEFAULT_OLLAMA_MODEL),
             ollama_url=ollama_cfg.get('url', DEFAULT_OLLAMA_URL),
+            ollama_rerank_enabled=rerank_cfg.get(
+                'ollama_enabled', DEFAULT_OLLAMA_RERANK_ENABLED
+            ),
+            ollama_rerank_top_n=rerank_cfg.get(
+                'top_n', DEFAULT_OLLAMA_RERANK_TOP_N
+            ),
         )
     
     def __post_init__(self):
@@ -194,6 +219,18 @@ class LSFSConfig:
         self.exclude_extensions = [_norm_ext(e) for e in self.exclude_extensions if e]
         self.include_extensions = [_norm_ext(e) for e in self.include_extensions if e]
         self.code_extensions = [_norm_ext(e) for e in self.code_extensions if e]
+
+        self.default_results = max(1, int(self.default_results))
+        self.search_candidates = max(self.default_results, int(self.search_candidates))
+        self.hybrid_alpha = float(min(1.0, max(0.0, self.hybrid_alpha)))
+        self.max_file_size_mb = max(1, int(self.max_file_size_mb))
+        self.max_text_bytes = max(1024, int(self.max_text_bytes))
+        self.chunk_size = max(200, int(self.chunk_size))
+        self.chunk_overlap = max(0, int(self.chunk_overlap))
+        self.max_chunks_per_file = max(1, int(self.max_chunks_per_file))
+        self.batch_size = max(1, int(self.batch_size))
+        self.max_threads = max(1, int(self.max_threads))
+        self.ollama_rerank_top_n = max(1, int(self.ollama_rerank_top_n))
 
         if not self.code_extensions:
             self.code_extensions = list(DEFAULT_CODE_EXTENSIONS)

@@ -65,13 +65,12 @@ pip install -r requirements.txt
 ```
 
 **Dependencies:**
-- `chromadb==0.4.22` - Vector database for embeddings
-- `sentence-transformers==2.3.1` - Lightweight embedding model
-- `requests==2.31.0` - HTTP client for Ollama API
-- `prompt-toolkit==3.0.43` - Interactive terminal input
-- `rich==13.7.0` - Beautiful terminal formatting
-- `numpy==1.24.3` - Numerical operations
-- `nltk==3.8.1` - Natural language utilities
+- `chromadb` - Vector database
+- `sentence-transformers` - Embedding models
+- `requests` - Ollama API client
+- `rich` - Terminal UI
+- `tqdm` - Indexing progress
+- `PyYAML` - Config loading
 
 ## Configuration
 
@@ -86,21 +85,38 @@ vector_db_dir: "./.lsfs_db"
 
 # LLM Settings
 ollama:
-  model: "qwen2.5:0.5b-instruct"        # Change to your preferred model
-  url: "http://localhost:11434"    # Ollama server address
+  enabled: true
+  model: "qwen2.5:0.5b-instruct"
+  url: "http://localhost:11434"
 
-# Embedding model (lightweight, ~80MB)
+# Multi-model embedding setup
 embedding:
-  model: "all-MiniLM-L6-v2"
+  default_model: "all-mpnet-base-v2"
+  code_model: "all-mpnet-base-v2"
+  intent_model: "all-MiniLM-L6-v2"
 
 # Search Settings
 search:
-  default_results: 5               # Number of results to return
-  max_file_size_mb: 10            # Skip files larger than this
+  default_results: 5
+  min_similarity: 0.3
+  candidates: 40
+  hybrid_alpha: 0.8
+  always_return_k: true
 
-# Performance
-performance:
-  enable_caching: true
+# Optional reranking
+rerank:
+  ollama_enabled: true
+  top_n: 20
+
+# Indexing
+indexing:
+  max_file_size_mb: 10
+  max_text_bytes: 262144
+  chunk_size: 1000
+  chunk_overlap: 120
+  max_chunks_per_file: 6
+  batch_size: 16
+  skip_hidden: true
 ```
 
 ### Configuration Options
@@ -109,10 +125,12 @@ performance:
 |---------|---------|---------|
 | `root_dir` | The folder to index and search | Desktop test folder |
 | `vector_db_dir` | Vector database storage location | `./.lsfs_db` |
-| `ollama.model` | LLM model to use | `tinyllama:latest` |
-| `embedding.model` | Embedding model | `all-MiniLM-L6-v2` |
+| `ollama.model` | LLM model for command parse/rerank | `qwen2.5:0.5b-instruct` |
+| `embedding.default_model` | Main retrieval model | `all-mpnet-base-v2` |
+| `embedding.code_model` | Code retrieval model | `all-mpnet-base-v2` |
 | `search.default_results` | Results per query | 5 |
-| `max_file_size_mb` | File size limit for indexing | 10 MB |
+| `search.candidates` | Candidate pool before rerank | 40 |
+| `indexing.max_file_size_mb` | File size limit for indexing | 10 MB |
 
 ## Usage
 
@@ -163,11 +181,11 @@ local-lsfs/
 
 ## How It Works
 
-1. **Indexing** - Files are read and split into chunks
-2. **Embedding** - Each chunk is converted to a vector using `sentence-transformers`
-3. **Storage** - Vectors are stored in ChromaDB
-4. **Query** - User queries are embedded and matched against stored vectors
-5. **Re-ranking** - Results are re-ranked using the local LLM
+1. **Indexing** - Files are filtered (system/media excluded), read safely, and chunked.
+2. **Embedding** - Chunks are embedded using file-type-aware models (`default` vs `code`).
+3. **Storage** - Chunk vectors go to ChromaDB, file metadata goes to `file_index.csv`.
+4. **Query** - Hybrid retrieval combines semantic score + lexical score.
+5. **Rerank** - Optional Ollama rerank improves final top-5 relevance.
 
 ## Troubleshooting
 

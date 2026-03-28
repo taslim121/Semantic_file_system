@@ -33,8 +33,11 @@ embedding:
 
 # Search Settings
 search:
-  default_results: 10 # Number of results to return
+  default_results: 5 # Always render top 5 results
   min_similarity: 0.3 # Minimum similarity threshold
+  candidates: 40 # Pull more candidates before reranking
+  hybrid_alpha: 0.8 # semantic weight; lexical weight = 0.2
+  always_return_k: true # Try to return k results whenever possible
 
 # Intent Routing (natural language -> which index to search)
 intent_routing:
@@ -52,8 +55,13 @@ intent_routing:
 # Optional LLM parsing (for messy natural language)
 ollama:
   enabled: true
-  model: "llama3.2:1b-instruct"
+  model: "qwen2.5:0.5b-instruct"
   url: "http://localhost:11434"
+
+# Optional reranking over top candidates to improve intent match
+rerank:
+  ollama_enabled: true
+  top_n: 20
 
 # Indexing Settings
 indexing:
