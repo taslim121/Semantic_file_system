@@ -1,30 +1,25 @@
-# Local LSFS Configuration
-
-# Directories
 directories:
-  root_dir: "C:/Users/Taslim/OneDrive/Desktop/lsfs-test"
-  vector_db_dir: "./.lsfs_db"
-
-# LLM Settings
+  root_dir: C:\Users\Omsai\Desktop\lsfs_test
+  vector_db_dir: ./.lsfs_db
 ollama:
-  model: "qwen2.5:0.5b-instruct" # Change to your preferred model
-  url: "http://localhost:11434"
-
-# Embedding Settings
+  model: qwen2.5:3b
+  url: http://localhost:11434
 embedding:
-  model: "all-MiniLM-L6-v2" # Lightweight and fast
-
-# Search Settings
+  model: all-mpnet-base-v2
 search:
   default_results: 5
   max_file_size_mb: 10
-
-# Performance
 performance:
   enable_caching: true
-
-# Features (DISABLED - No Redis needed)
 features:
   enable_versioning: false
   enable_redis: false
   enable_rollback: false
+multimodal:
+  enabled: true
+  db_path: ./db_multimodal
+  include_directories:
+    - C:\Users\Omsai\Desktop\lsfs_test
+  exclude_directories: []
+  top_k_default: 5
+  threshold_default: 0.0

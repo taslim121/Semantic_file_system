@@ -12,6 +12,7 @@ dist/
 .venv/
 env/
 venv/
+myenv/
 
 # Chroma / vector store cache
 .lsfs_db/
@@ -23,3 +24,5 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+db_multimodal/
